@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>議事録・録音ページ</title>
+<style>:root{color-scheme:dark}*{box-sizing:border-box}body{font:16px/1.6 system-ui,sans-serif;background:linear-gradient(135deg,#0a1325,#14273e);color:#ecf5ff;min-height:100vh;margin:0;padding:24px}.panel{max-width:600px;margin:8vh auto;padding:28px;background:#17253a;border:1px solid #354963;border-radius:18px;box-shadow:0 20px 60px #0005}h1{margin-top:0}button{border:0;border-radius:11px;padding:13px 20px;background:#12a4b2;color:white;font-weight:700;font-size:16px;cursor:pointer;margin:5px}button:disabled{opacity:.35;cursor:not-allowed}.secondary{background:#334961}audio{width:100%;margin-top:20px}p{white-space:pre-wrap}a{color:#8fe1f7}</style>
+</head><body><main class="panel"><h1>🎙 議事録用音声録音</h1><p>録音開始を押してマイクを許可してください。録音停止後、元のポータルに音声を返してこのタブを閉じます。</p><button id="start">● 録音開始</button><button id="stop" class="secondary" disabled>■ 録音停止</button><p id="status">未録音</p><audio id="player" controls hidden></audio><p id="fallback" hidden>音声が戻らなかった場合は下のリンクから保存し、ポータルの「録音ファイルを読み込み」で選択してください。</p><a id="download" hidden download="meeting-recording.webm">録音ファイルを保存</a></main>
+<script>
+const $=id=>document.getElementById(id);
+const nonce=new URLSearchParams(location.search).get('nonce')||'';
+let stream=null,recorder=null,chunks=[],audioUrl='';
+const mimeList=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'];
+$('start').onclick=async()=>{
+ try{
+  if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined')throw Error('このブラウザは録音に対応していません');
+  stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  const mime=mimeList.find(x=>MediaRecorder.isTypeSupported(x));
+  if(!mime)throw Error('録音可能な形式がありません');
+  chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime});
+  recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  recorder.onstop=async()=>{
+   stream?.getTracks().forEach(t=>t.stop());stream=null;
+   const blob=new Blob(chunks,{type:mime.split(';')[0]});
+   if(audioUrl)URL.revokeObjectURL(audioUrl);audioUrl=URL.createObjectURL(blob);
+   $('player').src=audioUrl;$('player').hidden=false;
+   $('download').href=audioUrl;$('download').download='meeting-recording.'+(blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm');$('download').hidden=false;
+   if(blob.size>7*1024*1024){$('status').textContent='7MBを超えました。短く録音し直してください。';$('fallback').hidden=false;return;}
+   if(!window.opener||!nonce){$('status').textContent='元のポータルとの接続を確認できません。ファイルを保存してください。';$('fallback').hidden=false;return;}
+   $('status').textContent='元のポータルへ転送中…';
+   const reader=new FileReader();reader.onerror=()=>{$('status').textContent='音声の読み込みに失敗しました';$('fallback').hidden=false;};
+   reader.onload=()=>{
+    const target=window.opener;
+    const onAck=e=>{
+      if(e.source!==target||e.data?.type!=='portal-recorder-ack'||e.data.nonce!==nonce)return;
+      window.removeEventListener('message',onAck);
+      if(e.data.ok){$('status').textContent='転送完了。元のポータルへ戻ってください。';window.close();}
+      else{$('status').textContent='転送できませんでした。ファイルを保存してください。';$('fallback').hidden=false;}
+    };
+    window.addEventListener('message',onAck);
+    target.postMessage({type:'portal-recorder-audio',nonce,dataUrl:reader.result},'*');
+    // ACKを受け取れないケース（モバイル、開き直しなど）は手動取り込みへ
+    setTimeout(()=>{if($('status').textContent==='元のポータルへ転送中…'){$('status').textContent='転送を確認できませんでした。ファイルを保存して読み込んでください。';$('fallback').hidden=false;}},6000);
+   };
+   reader.readAsDataURL(blob);
+  };
+  recorder.start(1000);$('start').disabled=true;$('stop').disabled=false;$('status').textContent='● 録音中…';
+ }catch(e){stream?.getTracks().forEach(t=>t.stop());stream=null;$('status').textContent='録音できません：'+(e.message||e);}
+};
+$('stop').onclick=()=>{if(recorder?.state==='recording')recorder.stop();$('start').disabled=false;$('stop').disabled=true;};
+window.addEventListener('beforeunload',()=>stream?.getTracks().forEach(t=>t.stop()));
+</script></body></html>
