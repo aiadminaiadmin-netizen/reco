@@ -21,24 +21,21 @@ $('start').onclick=async()=>{
    if(audioUrl)URL.revokeObjectURL(audioUrl);audioUrl=URL.createObjectURL(blob);
    $('player').src=audioUrl;$('player').hidden=false;
    $('download').href=audioUrl;$('download').download='meeting-recording.'+(blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm');$('download').hidden=false;
-   if(blob.size>7*1024*1024){$('status').textContent='7MBを超えました。短く録音し直してください。';$('fallback').hidden=false;return;}
+   if(!blob.size||blob.size>50*1024*1024){$('status').textContent=!blob.size?'音声データが空です。':'50MBを超えたためポータルへ送信できません。録音を短くするか、下の保存リンクをご利用ください。';$('fallback').hidden=false;return;}
    if(!window.opener||!nonce){$('status').textContent='元のポータルとの接続を確認できません。ファイルを保存してください。';$('fallback').hidden=false;return;}
    $('status').textContent='元のポータルへ転送中…';
-   const reader=new FileReader();reader.onerror=()=>{$('status').textContent='音声の読み込みに失敗しました';$('fallback').hidden=false;};
-   reader.onload=()=>{
-    const target=window.opener;
-    const onAck=e=>{
-      if(e.source!==target||e.data?.type!=='portal-recorder-ack'||e.data.nonce!==nonce)return;
-      window.removeEventListener('message',onAck);
-      if(e.data.ok){$('status').textContent='転送完了。元のポータルへ戻ってください。';window.close();}
-      else{$('status').textContent='転送できませんでした。ファイルを保存してください。';$('fallback').hidden=false;}
-    };
-    window.addEventListener('message',onAck);
-    target.postMessage({type:'portal-recorder-audio',nonce,dataUrl:reader.result},'*');
-    // ACKを受け取れないケース（モバイル、開き直しなど）は手動取り込みへ
-    setTimeout(()=>{if($('status').textContent==='元のポータルへ転送中…'){$('status').textContent='転送を確認できませんでした。ファイルを保存して読み込んでください。';$('fallback').hidden=false;}},6000);
+   const target=window.opener;
+   const onAck=e=>{
+     if(e.source!==target||e.data?.type!=='portal-recorder-ack'||e.data.nonce!==nonce)return;
+     window.removeEventListener('message',onAck);
+     if(e.data.ok){$('status').textContent='転送完了。元のポータルへ戻ってください。';window.close();}
+     else{$('status').textContent='転送できませんでした。下のリンクから録音を保存できます。';$('fallback').hidden=false;}
    };
-   reader.readAsDataURL(blob);
+   window.addEventListener('message',onAck);
+   // BlobはpostMessageで直接受け渡し可能。巨大なBase64化を避ける。
+   try{target.postMessage({type:'portal-recorder-audio',nonce,blob},'*');}
+   catch(e){$('status').textContent='転送できません：'+(e.message||e);$('fallback').hidden=false;}
+   setTimeout(()=>{if($('status').textContent==='元のポータルへ転送中…'){$('status').textContent='転送を確認できませんでした。下のリンクから保存して読み込んでください。';$('fallback').hidden=false;}},10000);
   };
   recorder.start(1000);$('start').disabled=true;$('stop').disabled=false;$('status').textContent='● 録音中…';
  }catch(e){stream?.getTracks().forEach(t=>t.stop());stream=null;$('status').textContent='録音できません：'+(e.message||e);}
